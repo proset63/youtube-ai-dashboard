@@ -9,6 +9,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user TEXT,
         run_id TEXT,
+        industry TEXT,
         canal TEXT,
         titulo TEXT,
         sentimiento TEXT,
@@ -21,13 +22,13 @@ def init_db():
     conn.close()
 
 
-def save_video(user, run_id, canal, titulo, sentimiento, score, resumen):
+def save_video(user, run_id, industry, canal, titulo, sentimiento, score, resumen):
     conn = sqlite3.connect("data.db")
     c = conn.cursor()
 
     c.execute("""
-    INSERT INTO videos VALUES (NULL,?,?,?,?,?,?,?)
-    """, (user, run_id, canal, titulo, sentimiento, score, resumen))
+    INSERT INTO videos VALUES (NULL,?,?,?,?,?,?,?,?)
+    """, (user, run_id, industry, canal, titulo, sentimiento, score, resumen))
 
     conn.commit()
     conn.close()
