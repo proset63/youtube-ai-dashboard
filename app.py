@@ -14,11 +14,8 @@ from openai import OpenAI
 # =========================
 st.set_page_config(page_title="AI SaaS PRO", layout="wide")
 
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
-client = OpenAI(api_key=OPENAI_API_KEY)
+youtube = build("youtube", "v3", developerKey=os.getenv("YOUTUBE_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # =========================
 # DB
@@ -39,7 +36,6 @@ CREATE TABLE IF NOT EXISTS analytics (
     insight TEXT
 )
 """)
-
 conn.commit()
 
 # =========================
@@ -70,13 +66,13 @@ user = st.session_state["user"]
 st.sidebar.success(f"👤 {user}")
 
 # =========================
-# STATE CONTROL
+# STATE
 # =========================
 if "run_id" not in st.session_state:
     st.session_state["run_id"] = None
 
 # =========================
-# UI INPUT
+# UI
 # =========================
 st.title("📊 SaaS Intelligence PRO")
 
@@ -91,12 +87,16 @@ run_btn = col1.button("🚀 Run Analysis")
 reset_btn = col2.button("🧹 Reset")
 
 # =========================
-# RESET
+# RESET REAL
 # =========================
 if reset_btn:
+    c.execute("DELETE FROM analytics WHERE user=?", (user,))
+    conn.commit()
+
     st.session_state["run_id"] = None
-    st.success("Reset hecho")
-    st.stop()
+
+    st.success("Datos eliminados")
+    st.rerun()
 
 # =========================
 # RUN PIPELINE
@@ -108,8 +108,9 @@ if run_btn and input_data.strip() != "":
 
     st.success(f"Run creado: {run_id}")
 
-    industries = {}
-    current = None
+    # FLEXIBLE PARSER (con o sin industria)
+    industries = {"General": []}
+    current = "General"
 
     for line in input_data.split("\n"):
         line = line.strip()
@@ -121,11 +122,10 @@ if run_btn and input_data.strip() != "":
             current = line.replace(":", "")
             industries[current] = []
         else:
-            if current:
-                industries[current].append(line)
+            industries[current].append(line)
 
     # =========================
-    # YOUTUBE + AI
+    # YOUTUBE + IA
     # =========================
     for industry, channels in industries.items():
 
@@ -142,6 +142,7 @@ if run_btn and input_data.strip() != "":
 
                 items = res.get("items", [])
                 if not items:
+                    st.warning(f"No encontrado: {channel_name}")
                     continue
 
                 channel_id = items[0]["snippet"]["channelId"]
@@ -205,13 +206,15 @@ Texto:
                 st.error(f"Error en {channel_name}: {e}")
 
     conn.commit()
+    st.rerun()
 
 # =========================
 # LOAD DATA
 # =========================
 df = pd.read_sql_query(
-    f"SELECT * FROM analytics WHERE user='{user}'",
-    conn
+    "SELECT * FROM analytics WHERE user=?",
+    conn,
+    params=(user,)
 )
 
 if df.empty:
@@ -219,15 +222,21 @@ if df.empty:
     st.stop()
 
 # =========================
-# SELECT RUN
+# RUN SELECTOR (ÚLTIMO POR DEFECTO)
 # =========================
-runs = df["run_id"].unique()
-run = st.selectbox("Selecciona run", runs)
+runs = sorted(df["run_id"].unique(), reverse=True)
 
-df_run = df[df["run_id"] == run]
+if st.session_state["run_id"]:
+    selected_run = st.session_state["run_id"]
+else:
+    selected_run = runs[0]
+
+selected_run = st.selectbox("Selecciona run", runs, index=runs.index(selected_run))
+
+df_run = df[df["run_id"] == selected_run]
 
 # =========================
-# KPI STRIPE STYLE
+# KPI
 # =========================
 st.subheader("📊 Overview")
 
