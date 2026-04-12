@@ -2,41 +2,75 @@ import streamlit as st
 from openai import OpenAI
 from youtube_rss import get_videos
 from db import init_db, save_video
-from auth import login, get_user
-from billing import get_plan
 import sqlite3
 import pandas as pd
 import json, re
+import os
 from datetime import datetime
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
+# =========================
+# CONFIG
+# =========================
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 init_db()
 
-st.set_page_config(page_title="AI SaaS", layout="wide")
+st.set_page_config(page_title="AI SaaS Dashboard", layout="wide")
 
-# 🔐 LOGIN
-login()
-user = get_user()
+# =========================
+# STRIPE STYLE UI
+# =========================
+st.markdown("""
+<style>
+.block-container { padding-top: 2rem; max-width: 1200px; }
+
+.metric-box {
+    background: #f9fafb;
+    padding: 16px;
+    border-radius: 14px;
+    border: 1px solid #e5e7eb;
+}
+
+.metric-label {
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.metric-value {
+    font-size: 26px;
+    font-weight: 600;
+    color: #111827;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# =========================
+# SIDEBAR
+# =========================
+with st.sidebar:
+    st.title("📊 AI SaaS")
+
+    user = st.text_input("Usuario").strip().lower()
+
+    st.markdown("---")
+
+    channels_input = st.text_area("Channel IDs")
+
+    run_btn = st.button("🚀 Analizar")
+
+# =========================
+# MAIN
+# =========================
+st.title("📈 Intelligence Dashboard")
 
 if not user:
     st.stop()
 
-plan = get_plan(user)
-
-st.sidebar.success(f"Plan: {plan}")
-
-# 📥 INPUT
-st.title("📊 AI Brand Intelligence SaaS")
-
-channels_input = st.text_area("Channel IDs")
 channels = [c.strip() for c in channels_input.split("\n") if c.strip()]
-
-run_btn = st.button("🚀 Run analysis")
-
 run_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
-# 🚀 RUN
+# =========================
+# RUN ANALYSIS
+# =========================
 if run_btn:
 
     for ch in channels:
@@ -46,7 +80,7 @@ if run_btn:
         for v in videos:
 
             prompt = f"""
-Devuelve JSON:
+Devuelve SOLO JSON:
 {{
 "sentimiento": "positivo|negativo|neutro",
 "score": 0.0,
@@ -78,9 +112,11 @@ Texto:
                     data["resumen"]
                 )
 
-    st.success("Run completado")
+    st.success(f"Run completado: {run_id}")
 
-# 📦 LOAD DATA
+# =========================
+# LOAD DATA
+# =========================
 conn = sqlite3.connect("data.db")
 
 df = pd.read_sql_query(
@@ -90,24 +126,77 @@ df = pd.read_sql_query(
 )
 
 if df.empty:
+    st.warning("No hay datos aún")
     st.stop()
 
-df["score"] = pd.to_numeric(df["score"])
+df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
-# 📊 RUNS
-runs = df["run_id"].unique()
+# =========================
+# RUNS (FIX IMPORTANTE)
+# =========================
+runs = sorted(df["run_id"].dropna().unique(), reverse=True)
 
-run = st.selectbox("Run", runs)
+if len(runs) == 0:
+    st.stop()
 
-df = df[df["run_id"] == run]
+run_1 = runs[0]
+run_2 = runs[1] if len(runs) > 1 else runs[0]
 
-# 📊 KPIs
-col1, col2, col3 = st.columns(3)
+df1 = df[df["run_id"] == run_1]
+df2 = df[df["run_id"] == run_2]
 
-col1.metric("Videos", len(df))
-col2.metric("Score", round(df["score"].mean(), 2))
-col3.metric("Canales", df["canal"].nunique())
+# =========================
+# OVERVIEW (STRIPE STYLE)
+# =========================
+st.markdown("### 📊 Overview")
 
-# 📊 CHART
-st.bar_chart(df.groupby("canal")["score"].mean())
-st.bar_chart(df["sentimiento"].value_counts())
+score_now = df1["score"].mean()
+score_prev = df2["score"].mean()
+
+if pd.isna(score_prev):
+    score_prev = 0
+
+delta = score_now - score_prev
+delta_pct = (delta / (abs(score_prev) + 0.0001)) * 100
+
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("Videos", len(df1), len(df1)-len(df2))
+col2.metric("Score", round(score_now,2), f"{delta:+.2f} ({delta_pct:+.1f}%)")
+col3.metric("Canales", df1["canal"].nunique(), df1["canal"].nunique()-df2["canal"].nunique())
+col4.metric("Run", run_1[:8])
+
+# =========================
+# COMPARATIVA POR CANAL
+# =========================
+st.markdown("---")
+st.subheader("📊 Channel Comparison")
+
+r1 = df1.groupby("canal")["score"].mean()
+r2 = df2.groupby("canal")["score"].mean()
+
+compare = pd.DataFrame({
+    "current": r1,
+    "previous": r2
+}).fillna(0)
+
+compare["delta"] = compare["current"] - compare["previous"]
+
+st.bar_chart(compare["delta"])
+
+st.success(f"🏆 Best channel: {compare['delta'].idxmax()}")
+
+# =========================
+# SENTIMIENTO
+# =========================
+st.markdown("---")
+st.subheader("📊 Sentiment")
+
+st.bar_chart(df1["sentimiento"].value_counts())
+
+# =========================
+# TREND
+# =========================
+st.subheader("📈 Trend")
+
+st.line_chart(df1["score"])
