@@ -2,8 +2,6 @@ import streamlit as st
 import os
 import sqlite3
 import pandas as pd
-import json
-import re
 from datetime import datetime
 
 from googleapiclient.discovery import build
@@ -12,14 +10,19 @@ from openai import OpenAI
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="AI SaaS Dashboard PRO", layout="wide")
+st.set_page_config(layout="wide")
 
-# APIs
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+youtube = build("youtube", "v3", developerKey=os.getenv("YOUTUBE_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
-client = OpenAI(api_key=OPENAI_API_KEY)
+# =========================
+# STATE CONTROL (IMPORTANTE)
+# =========================
+if "run_executed" not in st.session_state:
+    st.session_state["run_executed"] = False
+
+if "run_id" not in st.session_state:
+    st.session_state["run_id"] = None
 
 # =========================
 # DB
@@ -44,244 +47,90 @@ CREATE TABLE IF NOT EXISTS analytics (
 conn.commit()
 
 # =========================
-# AUTH (LOGIN)
+# SIMPLE LOGIN (opcional)
 # =========================
-USERS = {
-    "demo@saas.com": "1234",
-    "admin@saas.com": "admin"
-}
+USERS = {"demo@saas.com": "1234"}
 
-def login():
-    st.title("🔐 SaaS Login")
+st.sidebar.title("Login")
+email = st.sidebar.text_input("Email")
+password = st.sidebar.text_input("Password", type="password")
 
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if email in USERS and USERS[email] == password:
-            st.session_state["auth"] = True
-            st.session_state["user"] = email
-        else:
-            st.error("Credenciales incorrectas")
+if st.sidebar.button("Login"):
+    if email in USERS and USERS[email] == password:
+        st.session_state["auth"] = True
+        st.session_state["user"] = email
 
 if "auth" not in st.session_state:
-    login()
     st.stop()
 
 user = st.session_state["user"]
 
-st.sidebar.success(f"👤 {user}")
-
 # =========================
-# YOUTUBE FUNCTIONS (REAL API)
+# INPUT LIMPIO (CLAVE FIX)
 # =========================
-def search_channel(name):
-    res = youtube.search().list(
-        part="snippet",
-        q=name,
-        type="channel",
-        maxResults=1
-    ).execute()
-
-    items = res.get("items", [])
-    if not items:
-        return None
-
-    return items[0]["snippet"]["channelId"]
-
-
-def get_videos(channel_id):
-    res = youtube.search().list(
-        part="snippet",
-        channelId=channel_id,
-        maxResults=5,
-        order="date"
-    ).execute()
-
-    videos = []
-
-    for item in res.get("items", []):
-        videos.append({
-            "title": item["snippet"]["title"],
-            "description": item["snippet"]["description"]
-        })
-
-    return videos
-
-# =========================
-# OPENAI ANALYSIS
-# =========================
-def analyze_text(text):
-    prompt = f"""
-Devuelve SOLO JSON válido:
-
-{{
-"sentiment": "positive|neutral|negative",
-"score": 0-1,
-"insight": "1 frase clara"
-}}
-
-Texto:
-{text}
-"""
-
-    res = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    match = re.search(r"\{.*\}", res.choices[0].message.content, re.DOTALL)
-
-    if match:
-        return json.loads(match.group())
-
-    return {"sentiment": "neutral", "score": 0.5, "insight": "N/A"}
-
-# =========================
-# UI
-# =========================
-st.title("📊 SaaS Intelligence Dashboard PRO")
+st.title("📊 SaaS Dashboard PRO")
 
 input_data = st.text_area(
     "Industries + Channels",
-    placeholder="""
-AI:
-OpenAI
-Google Developers
-NVIDIA
-
-Marketing:
-HubSpot
-Nike
-Apple
-"""
+    value="",   # 🔥 IMPORTANTE: vacío
+    placeholder="AI:\nOpenAI\nNVIDIA\n\nMarketing:\nNike\nApple"
 )
 
-run_btn = st.button("🚀 Run Analysis")
+col1, col2 = st.columns(2)
+
+run_btn = col1.button("🚀 Run Analysis")
+reset_btn = col2.button("🧹 Reset Run")
 
 # =========================
-# PARSE INPUT
+# RESET LOGIC
 # =========================
-industries = {}
-current = None
-
-for line in input_data.split("\n"):
-    line = line.strip()
-
-    if not line:
-        continue
-
-    if line.endswith(":"):
-        current = line.replace(":", "")
-        industries[current] = []
-    else:
-        if current:
-            industries[current].append(line)
+if reset_btn:
+    st.session_state["run_executed"] = False
+    st.session_state["run_id"] = None
+    st.success("Reset completado")
 
 # =========================
-# RUN PIPELINE (REAL DATA)
+# SOLO EJECUTAR SI HAY INPUT
 # =========================
-if run_btn:
+if run_btn and input_data.strip() != "":
 
     run_id = datetime.now().strftime("%Y%m%d%H%M%S")
+    st.session_state["run_executed"] = True
+    st.session_state["run_id"] = run_id
 
-    for industry, channels in industries.items():
-
-        for channel_name in channels:
-
-            channel_id = search_channel(channel_name)
-
-            if not channel_id:
-                st.warning(f"No encontrado: {channel_name}")
-                continue
-
-            videos = get_videos(channel_id)
-
-            for v in videos:
-
-                text = v["title"] + " " + v["description"]
-
-                result = analyze_text(text)
-
-                c.execute("""
-                INSERT INTO analytics VALUES (NULL,?,?,?,?,?,?,?,?)
-                """, (
-                    user,
-                    run_id,
-                    industry,
-                    channel_name,
-                    v["title"],
-                    result["sentiment"],
-                    float(result["score"]),
-                    result["insight"]
-                ))
-
-    conn.commit()
-
-    st.success(f"Run completado: {run_id}")
+    st.success(f"Run creado: {run_id}")
 
 # =========================
-# LOAD DATA (USER ONLY)
+# SOLO MOSTRAR SI HAY RUN
 # =========================
-df = pd.read_sql_query(
-    f"SELECT * FROM analytics WHERE user='{user}'",
-    conn
-)
-
-if df.empty:
-    st.warning("No data yet")
+if not st.session_state["run_executed"]:
+    st.info("Introduce datos y pulsa Run Analysis")
     st.stop()
 
 # =========================
-# RUN SELECTOR
+# LOAD DATA
 # =========================
-runs = df["run_id"].unique()
-run = st.selectbox("Select Run", runs)
+df = pd.read_sql_query("SELECT * FROM analytics", conn)
 
-df_run = df[df["run_id"] == run]
+if df.empty:
+    st.warning("No hay datos aún")
+    st.stop()
+
+# =========================
+# FILTER RUN
+# =========================
+run_id = st.session_state["run_id"]
+df_run = df[df["run_id"] == run_id]
+
+st.subheader("📊 Resultados del Run")
+
+st.dataframe(df_run)
 
 # =========================
 # STRIPE STYLE KPIs
 # =========================
-st.subheader("📊 Overview")
+col1, col2, col3 = st.columns(3)
 
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Videos", len(df_run))
-col2.metric("Avg Score", round(df_run["score"].mean(), 2))
-col3.metric("Industries", df_run["industry"].nunique())
-col4.metric("Channels", df_run["channel"].nunique())
-
-st.markdown("---")
-
-# =========================
-# INDUSTRY COMPARISON
-# =========================
-st.subheader("🏭 Industry Performance")
-st.bar_chart(df_run.groupby("industry")["score"].mean())
-
-# =========================
-# CHANNEL COMPARISON
-# =========================
-st.subheader("📺 Channel Performance")
-st.bar_chart(df_run.groupby("channel")["score"].mean())
-
-# =========================
-# SENTIMENT
-# =========================
-st.subheader("💬 Sentiment Breakdown")
-st.bar_chart(df_run["sentiment"].value_counts())
-
-# =========================
-# TABLE INSIGHTS
-# =========================
-st.subheader("📋 Insights Table")
-
-st.dataframe(df_run[[
-    "industry",
-    "channel",
-    "title",
-    "sentiment",
-    "score",
-    "insight"
-]])
+col1.metric("Rows", len(df_run))
+col2.metric("Industries", df_run["industry"].nunique() if "industry" in df_run else 0)
+col3.metric("Channels", df_run["channel"].nunique() if "channel" in df_run else 0)
