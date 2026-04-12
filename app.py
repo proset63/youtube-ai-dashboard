@@ -8,28 +8,27 @@ import pandas as pd
 import sqlite3
 import os
 
-# 🔐 API KEY desde entorno (NO hardcodear)
+# 🔐 OpenAI key desde Streamlit Secrets
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# 🧠 init DB
 init_db()
 
 st.title("🚀 YouTube AI SaaS Dashboard PRO")
 
-# 🔐 LOGIN SIMPLE
-user = st.text_input("Usuario (email o nombre)")
+# 👤 Usuario
+user = st.text_input("Usuario")
 
 if not user:
     st.stop()
 
 st.success(f"Bienvenido {user} 👋")
 
-# 📺 INPUT CANALES
+# 📺 Canales input
 channels_input = st.text_area("Pega Channel IDs (uno por línea)")
 
 channels = [c.strip() for c in channels_input.split("\n") if c.strip()]
 
-# 🚀 ANALIZAR
+# 📊 ANALIZAR
 if st.button("Analizar"):
 
     for channel_id in channels:
@@ -72,9 +71,9 @@ Texto:
                     data["resumen"]
                 )
 
-    st.success("✅ Datos guardados correctamente")
+    st.success("✅ Datos guardados")
 
-# 📊 LEER DB POR USUARIO (SEGURO)
+# 📦 CARGAR DATA
 conn = sqlite3.connect("data.db")
 df = pd.read_sql_query(
     "SELECT * FROM videos WHERE user=?",
@@ -82,43 +81,52 @@ df = pd.read_sql_query(
     params=(user,)
 )
 
-# 🧪 DEBUG (puedes quitar luego)
-# st.write(df)
-
-st.subheader("📋 Histórico del usuario")
+st.subheader("📋 Datos del usuario")
 st.dataframe(df)
 
-# 📊 DASHBOARD
-if not df.empty:
+# 🚨 SI NO HAY DATOS
+if df.empty:
+    st.warning("⚠️ No hay datos aún. Ejecuta análisis.")
+    st.stop()
 
-    # 🔢 asegurar tipo numérico
-    df["score"] = pd.to_numeric(df["score"], errors="coerce")
+# 🔧 DEBUG
+st.subheader("🔍 Debug canales")
+st.write(df["canal"].value_counts())
 
-    # 📊 COMPARATIVA CANALES
-    st.subheader("📊 Comparación de canales")
+# 📌 LISTA FIJA DE CANALES (IMPORTANTE)
+expected_channels = channels
 
-    canal_score = df.groupby("canal")["score"].mean()
-    st.bar_chart(canal_score)
+# 🔢 asegurar tipo
+df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
-    # 📊 SENTIMIENTO POR CANAL
-    st.subheader("📊 Sentimiento por canal")
+# 📊 RANKING CANALES
+st.subheader("📊 Ranking de canales")
 
-    tabla = df.groupby(["canal", "sentimiento"]).size().unstack(fill_value=0)
-    st.dataframe(tabla)
+ranking = df.groupby("canal")["score"].mean()
 
-    # 🏆 GANADOR
-    st.subheader("🏆 Canal ganador")
+# 👉 fuerza aparición de TODOS los canales
+ranking = ranking.reindex(expected_channels, fill_value=0)
 
-    ganador = canal_score.idxmax()
-    st.success(f"🏆 Mejor canal: {ganador}")
+st.bar_chart(ranking)
 
-    # 📈 EVOLUCIÓN
-    st.subheader("📈 Evolución score")
-    st.line_chart(df["score"])
+# 🏆 GANADOR
+winner = ranking.idxmax()
+st.success(f"🏆 Mejor canal: {winner}")
 
-    # 📊 GLOBAL
-    st.subheader("📊 Sentimiento global")
-    st.bar_chart(df["sentimiento"].value_counts())
+# 📊 SENTIMIENTO POR CANAL
+st.subheader("📊 Sentimiento por canal")
 
-else:
-    st.warning("⚠️ No hay datos todavía. Ejecuta un análisis.")
+tabla = df.groupby(["canal", "sentimiento"]).size().unstack(fill_value=0)
+
+# 👉 asegura columnas completas
+tabla = tabla.reindex(expected_channels, fill_value=0)
+
+st.dataframe(tabla)
+
+# 📈 EVOLUCIÓN GLOBAL
+st.subheader("📈 Evolución del score")
+st.line_chart(df["score"])
+
+# 📊 GLOBAL SENTIMENT
+st.subheader("📊 Sentimiento global")
+st.bar_chart(df["sentimiento"].value_counts())
