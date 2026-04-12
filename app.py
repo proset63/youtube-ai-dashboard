@@ -12,7 +12,7 @@ from openai import OpenAI
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="AI SaaS Dashboard", layout="wide")
+st.set_page_config(page_title="AI SaaS Dashboard PRO", layout="wide")
 
 # APIs
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -44,27 +44,33 @@ CREATE TABLE IF NOT EXISTS analytics (
 conn.commit()
 
 # =========================
-# AUTH SIMPLE
+# AUTH (LOGIN)
 # =========================
 USERS = {
-    "demo@saas.com": "1234"
+    "demo@saas.com": "1234",
+    "admin@saas.com": "admin"
 }
 
-st.sidebar.title("🔐 Login")
+def login():
+    st.title("🔐 SaaS Login")
 
-email = st.sidebar.text_input("Email")
-password = st.sidebar.text_input("Password", type="password")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
 
-if st.sidebar.button("Login"):
-    if email in USERS and USERS[email] == password:
-        st.session_state["user"] = email
-    else:
-        st.error("Credenciales incorrectas")
+    if st.button("Login"):
+        if email in USERS and USERS[email] == password:
+            st.session_state["auth"] = True
+            st.session_state["user"] = email
+        else:
+            st.error("Credenciales incorrectas")
 
-if "user" not in st.session_state:
+if "auth" not in st.session_state:
+    login()
     st.stop()
 
 user = st.session_state["user"]
+
+st.sidebar.success(f"👤 {user}")
 
 # =========================
 # YOUTUBE FUNCTIONS (REAL API)
@@ -107,7 +113,7 @@ def get_videos(channel_id):
 # =========================
 def analyze_text(text):
     prompt = f"""
-Devuelve SOLO JSON:
+Devuelve SOLO JSON válido:
 
 {{
 "sentiment": "positive|neutral|negative",
@@ -173,7 +179,7 @@ for line in input_data.split("\n"):
             industries[current].append(line)
 
 # =========================
-# RUN PIPELINE (REAL YOUTUBE + AI)
+# RUN PIPELINE (REAL DATA)
 # =========================
 if run_btn:
 
@@ -215,7 +221,7 @@ if run_btn:
     st.success(f"Run completado: {run_id}")
 
 # =========================
-# LOAD DATA
+# LOAD DATA (USER ONLY)
 # =========================
 df = pd.read_sql_query(
     f"SELECT * FROM analytics WHERE user='{user}'",
@@ -235,7 +241,7 @@ run = st.selectbox("Select Run", runs)
 df_run = df[df["run_id"] == run]
 
 # =========================
-# STRIPE STYLE KPI
+# STRIPE STYLE KPIs
 # =========================
 st.subheader("📊 Overview")
 
@@ -267,9 +273,10 @@ st.subheader("💬 Sentiment Breakdown")
 st.bar_chart(df_run["sentiment"].value_counts())
 
 # =========================
-# TABLE
+# TABLE INSIGHTS
 # =========================
-st.subheader("📋 Insights")
+st.subheader("📋 Insights Table")
+
 st.dataframe(df_run[[
     "industry",
     "channel",
