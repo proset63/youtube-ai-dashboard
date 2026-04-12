@@ -8,37 +8,34 @@ import pandas as pd
 import sqlite3
 import os
 
+# 🔐 OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 init_db()
 
-# 🎨 CONFIG UI
+# 🎨 UI CONFIG
 st.set_page_config(
-    page_title="AI Analytics SaaS",
+    page_title="AI SaaS Dashboard",
     layout="wide"
 )
 
-# 🧭 SIDEBAR (estilo empresa)
-with st.sidebar:
-    st.title("📊 AI SaaS Dashboard")
+st.title("📊 AI Industry Intelligence Dashboard")
 
-    user = st.text_input("Usuario")
+# 👤 USER
+user = st.text_input("Usuario")
 
-    st.markdown("---")
-
-    st.markdown("### 📥 Canales por industria")
-    channels_input = st.text_area("Pega canales")
-
-    run = st.button("🚀 Analizar")
-
-# 🚫 STOP SIN USER
 if not user:
     st.stop()
 
-st.title("📈 Industry Intelligence Dashboard")
+st.success(f"Bienvenido {user} 👋")
 
-# 📦 PARSE CANALES
+# 📥 INPUT CANALES
+st.subheader("📥 Canales a analizar")
+
+channels_input = st.text_area("Pega Channel IDs (uno por línea)")
 channels = [c.strip() for c in channels_input.split("\n") if c.strip()]
+
+run = st.button("🚀 Analizar")
 
 # 🚀 ANALYSIS
 if run:
@@ -68,6 +65,7 @@ Texto:
             )
 
             result = response.choices[0].message.content
+
             match = re.search(r"\{.*\}", result, re.DOTALL)
 
             if match:
@@ -92,14 +90,19 @@ df = pd.read_sql_query(
     params=(user,)
 )
 
+# 🚨 SI NO HAY DATOS
 if df.empty:
-    st.warning("⚠️ No hay datos aún")
+    st.warning("⚠️ No hay datos todavía")
     st.stop()
 
+# 🔢 CLEAN
 df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
+# 🚨 CLAVE: SOLO CANALES ACTUALES
+df = df[df["canal"].isin(channels)]
+
 # =========================
-# 📊 KPI CARDS (TOP)
+# 📊 KPI CARDS
 # =========================
 
 col1, col2, col3, col4 = st.columns(4)
@@ -107,49 +110,42 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("📹 Videos", len(df))
 col2.metric("⭐ Score medio", round(df["score"].mean(), 2))
 col3.metric("📡 Canales", df["canal"].nunique())
-col4.metric("📊 Sentimiento positivo", (df["sentimiento"] == "positivo").sum())
+col4.metric("📊 Positivos", (df["sentimiento"] == "positivo").sum())
 
 st.markdown("---")
 
 # =========================
-# 📊 DASHBOARD PRINCIPAL
+# 📊 RANKING
 # =========================
 
-left, right = st.columns(2)
+st.subheader("📊 Ranking de canales")
 
-with left:
-    st.subheader("📊 Ranking de canales")
-    ranking = df.groupby("canal")["score"].mean()
-    st.bar_chart(ranking)
+ranking = df.groupby("canal")["score"].mean()
 
-with right:
-    st.subheader("📈 Evolución del score")
-    st.line_chart(df["score"])
+st.bar_chart(ranking)
 
-st.markdown("---")
+# 🏆 WINNER
+st.success(f"🏆 Mejor canal: {ranking.idxmax()}")
 
 # =========================
-# 📊 ANALYTICS TABLES
+# 📊 SENTIMIENTO
 # =========================
 
-col1, col2 = st.columns(2)
+st.subheader("📊 Sentimiento por canal")
 
-with col1:
-    st.subheader("📊 Sentimiento por canal")
-    st.dataframe(
-        df.groupby(["canal", "sentimiento"]).size().unstack(fill_value=0)
-    )
-
-with col2:
-    st.subheader("📊 Distribución global")
-    st.bar_chart(df["sentimiento"].value_counts())
+sent = df.groupby(["canal", "sentimiento"]).size().unstack(fill_value=0)
+st.dataframe(sent)
 
 # =========================
-# 🏆 INSIGHT BUSINESS
+# 📈 EVOLUCIÓN
 # =========================
 
-st.markdown("---")
-st.subheader("🧠 Insight automático")
+st.subheader("📈 Evolución del score")
+st.line_chart(df["score"])
 
-if ranking.idxmax():
-    st.success(f"🏆 Mejor canal: {ranking.idxmax()}")
+# =========================
+# 📊 GLOBAL
+# =========================
+
+st.subheader("📊 Sentimiento global")
+st.bar_chart(df["sentimiento"].value_counts())
