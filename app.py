@@ -8,28 +8,40 @@ import pandas as pd
 import sqlite3
 import os
 
-# 🔐 OpenAI key desde Streamlit Secrets
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 init_db()
 
-st.title("🚀 YouTube AI SaaS Dashboard PRO")
+# 🎨 CONFIG UI
+st.set_page_config(
+    page_title="AI Analytics SaaS",
+    layout="wide"
+)
 
-# 👤 Usuario
-user = st.text_input("Usuario")
+# 🧭 SIDEBAR (estilo empresa)
+with st.sidebar:
+    st.title("📊 AI SaaS Dashboard")
 
+    user = st.text_input("Usuario")
+
+    st.markdown("---")
+
+    st.markdown("### 📥 Canales por industria")
+    channels_input = st.text_area("Pega canales")
+
+    run = st.button("🚀 Analizar")
+
+# 🚫 STOP SIN USER
 if not user:
     st.stop()
 
-st.success(f"Bienvenido {user} 👋")
+st.title("📈 Industry Intelligence Dashboard")
 
-# 📺 Canales input
-channels_input = st.text_area("Pega Channel IDs (uno por línea)")
-
+# 📦 PARSE CANALES
 channels = [c.strip() for c in channels_input.split("\n") if c.strip()]
 
-# 📊 ANALIZAR
-if st.button("Analizar"):
+# 🚀 ANALYSIS
+if run:
 
     for channel_id in channels:
 
@@ -38,7 +50,7 @@ if st.button("Analizar"):
         for v in videos:
 
             prompt = f"""
-Devuelve SOLO JSON válido:
+Devuelve SOLO JSON:
 
 {{
   "sentimiento": "positivo | negativo | neutro",
@@ -56,7 +68,6 @@ Texto:
             )
 
             result = response.choices[0].message.content
-
             match = re.search(r"\{.*\}", result, re.DOTALL)
 
             if match:
@@ -71,9 +82,9 @@ Texto:
                     data["resumen"]
                 )
 
-    st.success("✅ Datos guardados")
+    st.success("✅ Análisis completado")
 
-# 📦 CARGAR DATA
+# 📦 LOAD DATA
 conn = sqlite3.connect("data.db")
 df = pd.read_sql_query(
     "SELECT * FROM videos WHERE user=?",
@@ -81,52 +92,64 @@ df = pd.read_sql_query(
     params=(user,)
 )
 
-st.subheader("📋 Datos del usuario")
-st.dataframe(df)
-
-# 🚨 SI NO HAY DATOS
 if df.empty:
-    st.warning("⚠️ No hay datos aún. Ejecuta análisis.")
+    st.warning("⚠️ No hay datos aún")
     st.stop()
 
-# 🔧 DEBUG
-st.subheader("🔍 Debug canales")
-st.write(df["canal"].value_counts())
-
-# 📌 LISTA FIJA DE CANALES (IMPORTANTE)
-expected_channels = channels
-
-# 🔢 asegurar tipo
 df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
-# 📊 RANKING CANALES
-st.subheader("📊 Ranking de canales")
+# =========================
+# 📊 KPI CARDS (TOP)
+# =========================
 
-ranking = df.groupby("canal")["score"].mean()
+col1, col2, col3, col4 = st.columns(4)
 
-# 👉 fuerza aparición de TODOS los canales
-ranking = ranking.reindex(expected_channels, fill_value=0)
+col1.metric("📹 Videos", len(df))
+col2.metric("⭐ Score medio", round(df["score"].mean(), 2))
+col3.metric("📡 Canales", df["canal"].nunique())
+col4.metric("📊 Sentimiento positivo", (df["sentimiento"] == "positivo").sum())
 
-st.bar_chart(ranking)
+st.markdown("---")
 
-# 🏆 GANADOR
-winner = ranking.idxmax()
-st.success(f"🏆 Mejor canal: {winner}")
+# =========================
+# 📊 DASHBOARD PRINCIPAL
+# =========================
 
-# 📊 SENTIMIENTO POR CANAL
-st.subheader("📊 Sentimiento por canal")
+left, right = st.columns(2)
 
-tabla = df.groupby(["canal", "sentimiento"]).size().unstack(fill_value=0)
+with left:
+    st.subheader("📊 Ranking de canales")
+    ranking = df.groupby("canal")["score"].mean()
+    st.bar_chart(ranking)
 
-# 👉 asegura columnas completas
-tabla = tabla.reindex(expected_channels, fill_value=0)
+with right:
+    st.subheader("📈 Evolución del score")
+    st.line_chart(df["score"])
 
-st.dataframe(tabla)
+st.markdown("---")
 
-# 📈 EVOLUCIÓN GLOBAL
-st.subheader("📈 Evolución del score")
-st.line_chart(df["score"])
+# =========================
+# 📊 ANALYTICS TABLES
+# =========================
 
-# 📊 GLOBAL SENTIMENT
-st.subheader("📊 Sentimiento global")
-st.bar_chart(df["sentimiento"].value_counts())
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("📊 Sentimiento por canal")
+    st.dataframe(
+        df.groupby(["canal", "sentimiento"]).size().unstack(fill_value=0)
+    )
+
+with col2:
+    st.subheader("📊 Distribución global")
+    st.bar_chart(df["sentimiento"].value_counts())
+
+# =========================
+# 🏆 INSIGHT BUSINESS
+# =========================
+
+st.markdown("---")
+st.subheader("🧠 Insight automático")
+
+if ranking.idxmax():
+    st.success(f"🏆 Mejor canal: {ranking.idxmax()}")
