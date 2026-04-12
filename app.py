@@ -15,50 +15,51 @@ from datetime import datetime
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 init_db()
 
-st.set_page_config(page_title="AI SaaS Dashboard", layout="wide")
+st.set_page_config(page_title="Analytics", layout="wide")
 
 # =========================
-# SIDEBAR (UI PRO)
+# STYLE (STRIPE LIKE)
+# =========================
+st.markdown("""
+    <style>
+        .main { background-color: #ffffff; }
+        h1, h2, h3 { font-weight: 600; color: #111827; }
+        .stMetric { background-color: #f9fafb; padding: 15px; border-radius: 12px; }
+        .block-container { padding-top: 2rem; }
+    </style>
+""", unsafe_allow_html=True)
+
+# =========================
+# SIDEBAR
 # =========================
 with st.sidebar:
-    st.title("📊 AI SaaS Dashboard")
+    st.title("📊 Analytics")
 
     user = st.text_input("Usuario")
 
     st.markdown("---")
 
-    st.subheader("📥 Canales")
-    channels_input = st.text_area("Channel IDs (uno por línea)")
+    channels_input = st.text_area("Channel IDs")
 
-    run_button = st.button("🚀 Analizar")
+    run_btn = st.button("Run analysis")
 
-    st.markdown("---")
-
-    st.subheader("🧠 Info")
-    st.caption("Cada análisis = 1 run independiente")
+    st.caption("Cada run es un snapshot")
 
 # =========================
 # MAIN
 # =========================
-st.title("📈 Industry Intelligence Dashboard")
+st.title("📈 Dashboard")
 
 if not user:
     st.stop()
 
-# =========================
-# PARSE CHANNELS
-# =========================
 channels = [c.strip() for c in channels_input.split("\n") if c.strip()]
-
-# =========================
-# RUN ID
-# =========================
 run_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
 # =========================
-# ANALYSIS
+# RUN ANALYSIS
 # =========================
-if run_button:
+if run_btn:
 
     for channel_id in channels:
 
@@ -68,13 +69,11 @@ if run_button:
 
             prompt = f"""
 Devuelve SOLO JSON:
-
 {{
   "sentimiento": "positivo | negativo | neutro",
   "score": 0.0,
   "resumen": "1 frase"
 }}
-
 Texto:
 {v['title']} - {v['summary']}
 """
@@ -100,7 +99,7 @@ Texto:
                     data["resumen"]
                 )
 
-    st.success(f"✅ Run completado: {run_id}")
+    st.success("Run completed")
 
 # =========================
 # LOAD DATA
@@ -114,87 +113,80 @@ df = pd.read_sql_query(
 )
 
 if df.empty:
-    st.warning("⚠️ No hay datos aún")
+    st.info("No data yet")
     st.stop()
 
 df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
 # =========================
-# RUN SELECTOR
+# RUNS
 # =========================
 runs = sorted(df["run_id"].unique(), reverse=True)
 
-col1, col2 = st.columns(2)
+col1, col2 = st.columns([1,1])
 
 with col1:
-    run_1 = st.selectbox("Run actual", runs)
+    run_1 = st.selectbox("Current run", runs)
 
 with col2:
-    run_2 = st.selectbox("Run anterior", runs)
+    run_2 = st.selectbox("Previous run", runs)
 
 df1 = df[df["run_id"] == run_1]
 df2 = df[df["run_id"] == run_2]
 
 # =========================
-# KPI DASHBOARD
+# KPI STRIPE STYLE
 # =========================
-st.markdown("## 📊 KPIs")
+st.markdown("### Overview")
 
-c1, c2, c3, c4 = st.columns(4)
+k1, k2, k3, k4 = st.columns(4)
 
-c1.metric("Videos (actual)", len(df1))
-c2.metric("Score medio", round(df1["score"].mean(), 2))
-c3.metric("Canales", df1["canal"].nunique())
-c4.metric("Run ID", run_1)
+k1.metric("Videos", len(df1))
+k2.metric("Avg Score", round(df1["score"].mean(), 2))
+k3.metric("Channels", df1["canal"].nunique())
+k4.metric("Run", run_1)
 
 st.markdown("---")
 
 # =========================
-# COMPARACIÓN RUNS
+# COMPARISON
 # =========================
-st.subheader("📊 Comparación de runs")
+st.markdown("### Performance change")
 
 score1 = df1["score"].mean()
 score2 = df2["score"].mean()
-
 delta = score1 - score2
 
-a, b, c = st.columns(3)
+c1, c2, c3 = st.columns(3)
 
-a.metric("Score actual", round(score1, 2))
-b.metric("Score anterior", round(score2, 2))
-c.metric("Cambio", round(delta, 2))
+c1.metric("Current", round(score1, 2))
+c2.metric("Previous", round(score2, 2))
+c3.metric("Change", round(delta, 2))
 
 st.markdown("---")
 
 # =========================
-# POR CANAL
+# CHANNEL PERFORMANCE
 # =========================
-st.subheader("📊 Evolución por canal")
+st.markdown("### Channel performance")
 
 r1 = df1.groupby("canal")["score"].mean()
 r2 = df2.groupby("canal")["score"].mean()
 
 compare = pd.DataFrame({
-    "actual": r1,
-    "anterior": r2
+    "current": r1,
+    "previous": r2
 }).fillna(0)
 
-compare["delta"] = compare["actual"] - compare["anterior"]
+compare["delta"] = compare["current"] - compare["previous"]
 
-st.dataframe(compare)
 st.bar_chart(compare["delta"])
 
-st.success(f"🏆 Mejor evolución: {compare['delta'].idxmax()}")
+st.markdown("---")
 
 # =========================
-# SENTIMIENTO
+# SENTIMENT
 # =========================
-st.subheader("📊 Sentimiento actual")
+st.markdown("### Sentiment")
+
 st.bar_chart(df1["sentimiento"].value_counts())
-
-# =========================
-# EVOLUCIÓN
-# =========================
-st.subheader("📈 Evolución del score")
-st.line_chart(df1["score"])
