@@ -2,24 +2,14 @@ import streamlit as st
 from openai import OpenAI
 from youtube_rss import get_videos
 from db import init_db, save_video
-import json
-import re
-import pandas as pd
-import sqlite3
-import os
+import json, re, pandas as pd, sqlite3, os
+from datetime import datetime
 
-# 🔐 OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 init_db()
 
-# 🎨 UI CONFIG
-st.set_page_config(
-    page_title="AI SaaS Dashboard",
-    layout="wide"
-)
-
-st.title("📊 AI Industry Intelligence Dashboard")
+st.set_page_config(layout="wide")
+st.title("🚀 AI SaaS Dashboard (Multi-Run)")
 
 # 👤 USER
 user = st.text_input("Usuario")
@@ -27,34 +17,28 @@ user = st.text_input("Usuario")
 if not user:
     st.stop()
 
-st.success(f"Bienvenido {user} 👋")
-
-# 📥 INPUT CANALES
-st.subheader("📥 Canales a analizar")
-
-channels_input = st.text_area("Pega Channel IDs (uno por línea)")
+# 📥 INPUT
+channels_input = st.text_area("Channel IDs")
 channels = [c.strip() for c in channels_input.split("\n") if c.strip()]
 
-run = st.button("🚀 Analizar")
+# 🆕 RUN ID
+run_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
-# 🚀 ANALYSIS
-if run:
+# 🚀 ANALYZE
+if st.button("Analizar"):
 
     for channel_id in channels:
-
         videos = get_videos(channel_id)
 
         for v in videos:
 
             prompt = f"""
 Devuelve SOLO JSON:
-
 {{
-  "sentimiento": "positivo | negativo | neutro",
-  "score": 0.0,
-  "resumen": "1 frase"
+"sentimiento": "positivo | negativo | neutro",
+"score": 0.0,
+"resumen": "1 frase"
 }}
-
 Texto:
 {v['title']} - {v['summary']}
 """
@@ -65,7 +49,6 @@ Texto:
             )
 
             result = response.choices[0].message.content
-
             match = re.search(r"\{.*\}", result, re.DOTALL)
 
             if match:
@@ -73,6 +56,7 @@ Texto:
 
                 save_video(
                     user,
+                    run_id,
                     channel_id,
                     v["title"],
                     data["sentimiento"],
@@ -80,72 +64,42 @@ Texto:
                     data["resumen"]
                 )
 
-    st.success("✅ Análisis completado")
+    st.success(f"✅ Run guardado: {run_id}")
 
 # 📦 LOAD DATA
 conn = sqlite3.connect("data.db")
+
 df = pd.read_sql_query(
     "SELECT * FROM videos WHERE user=?",
     conn,
     params=(user,)
 )
 
-# 🚨 SI NO HAY DATOS
 if df.empty:
-    st.warning("⚠️ No hay datos todavía")
+    st.warning("No hay datos")
     st.stop()
 
-# 🔢 CLEAN
+# 🎯 SELECT RUN
+runs = df["run_id"].unique()
+selected_run = st.selectbox("Selecciona run", runs)
+
+df = df[df["run_id"] == selected_run]
+
 df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
-# 🚨 CLAVE: SOLO CANALES ACTUALES
-df = df[df["canal"].isin(channels)]
+# 📊 KPIs
+col1, col2, col3 = st.columns(3)
+col1.metric("Videos", len(df))
+col2.metric("Score medio", round(df["score"].mean(), 2))
+col3.metric("Canales", df["canal"].nunique())
 
-# =========================
-# 📊 KPI CARDS
-# =========================
-
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("📹 Videos", len(df))
-col2.metric("⭐ Score medio", round(df["score"].mean(), 2))
-col3.metric("📡 Canales", df["canal"].nunique())
-col4.metric("📊 Positivos", (df["sentimiento"] == "positivo").sum())
-
-st.markdown("---")
-
-# =========================
-# 📊 RANKING
-# =========================
-
-st.subheader("📊 Ranking de canales")
-
+# 📊 CHARTS
+st.subheader("Ranking")
 ranking = df.groupby("canal")["score"].mean()
-
 st.bar_chart(ranking)
 
-# 🏆 WINNER
-st.success(f"🏆 Mejor canal: {ranking.idxmax()}")
-
-# =========================
-# 📊 SENTIMIENTO
-# =========================
-
-st.subheader("📊 Sentimiento por canal")
-
-sent = df.groupby(["canal", "sentimiento"]).size().unstack(fill_value=0)
-st.dataframe(sent)
-
-# =========================
-# 📈 EVOLUCIÓN
-# =========================
-
-st.subheader("📈 Evolución del score")
-st.line_chart(df["score"])
-
-# =========================
-# 📊 GLOBAL
-# =========================
-
-st.subheader("📊 Sentimiento global")
+st.subheader("Sentimiento")
 st.bar_chart(df["sentimiento"].value_counts())
+
+st.subheader("Evolución")
+st.line_chart(df["score"])

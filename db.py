@@ -8,6 +8,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS videos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user TEXT,
+        run_id TEXT,
         canal TEXT,
         titulo TEXT,
         sentimiento TEXT,
@@ -20,14 +21,14 @@ def init_db():
     conn.close()
 
 
-def save_video(user, canal, titulo, sentimiento, score, resumen):
+def save_video(user, run_id, canal, titulo, sentimiento, score, resumen):
     conn = sqlite3.connect("data.db")
     c = conn.cursor()
 
     c.execute("""
-    INSERT INTO videos (user, canal, titulo, sentimiento, score, resumen)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """, (user, canal, titulo, sentimiento, score, resumen))
+    INSERT INTO videos (user, run_id, canal, titulo, sentimiento, score, resumen)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (user, run_id, canal, titulo, sentimiento, score, resumen))
 
     conn.commit()
     conn.close()
