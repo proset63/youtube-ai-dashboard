@@ -26,8 +26,7 @@ def save_video(user, run_id, canal, titulo, sentimiento, score, resumen):
     c = conn.cursor()
 
     c.execute("""
-    INSERT INTO videos (user, run_id, canal, titulo, sentimiento, score, resumen)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO videos VALUES (NULL,?,?,?,?,?,?,?)
     """, (user, run_id, canal, titulo, sentimiento, score, resumen))
 
     conn.commit()
