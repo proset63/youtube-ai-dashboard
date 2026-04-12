@@ -17,33 +17,6 @@ init_db()
 st.set_page_config(page_title="AI SaaS Dashboard", layout="wide")
 
 # =========================
-# STRIPE STYLE UI
-# =========================
-st.markdown("""
-<style>
-.block-container { padding-top: 2rem; max-width: 1200px; }
-
-.metric-box {
-    background: #f9fafb;
-    padding: 16px;
-    border-radius: 14px;
-    border: 1px solid #e5e7eb;
-}
-
-.metric-label {
-    font-size: 12px;
-    color: #6b7280;
-}
-
-.metric-value {
-    font-size: 26px;
-    font-weight: 600;
-    color: #111827;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# =========================
 # SIDEBAR
 # =========================
 with st.sidebar:
@@ -51,21 +24,40 @@ with st.sidebar:
 
     user = st.text_input("Usuario").strip().lower()
 
-    st.markdown("---")
-
-    channels_input = st.text_area("Channel IDs")
+    st.markdown("### 🏭 Input por industria")
+    channels_input = st.text_area(
+        "Formato:\nMARKETING:\nchannel1\nchannel2\n\nAI:\nchannel3"
+    )
 
     run_btn = st.button("🚀 Analizar")
 
 # =========================
 # MAIN
 # =========================
-st.title("📈 Intelligence Dashboard")
+st.title("📈 Industry Intelligence SaaS")
 
 if not user:
     st.stop()
 
-channels = [c.strip() for c in channels_input.split("\n") if c.strip()]
+# =========================
+# PARSE INDUSTRIES (CLAVE)
+# =========================
+industries = {}
+current = None
+
+for line in channels_input.split("\n"):
+    line = line.strip()
+
+    if not line:
+        continue
+
+    if line.endswith(":"):
+        current = line.replace(":", "")
+        industries[current] = []
+    else:
+        if current:
+            industries[current].append(line)
+
 run_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
 # =========================
@@ -73,13 +65,15 @@ run_id = datetime.now().strftime("%Y%m%d%H%M%S")
 # =========================
 if run_btn:
 
-    for ch in channels:
+    for industry, channels in industries.items():
 
-        videos = get_videos(ch)
+        for channel_id in channels:
 
-        for v in videos:
+            videos = get_videos(channel_id)
 
-            prompt = f"""
+            for v in videos:
+
+                prompt = f"""
 Devuelve SOLO JSON:
 {{
 "sentimiento": "positivo|negativo|neutro",
@@ -91,26 +85,27 @@ Texto:
 {v['title']} - {v['summary']}
 """
 
-            res = client.chat.completions.create(
-                model="gpt-4.1-mini",
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            text = res.choices[0].message.content
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-
-            if match:
-                data = json.loads(match.group())
-
-                save_video(
-                    user,
-                    run_id,
-                    ch,
-                    v["title"],
-                    data["sentimiento"],
-                    float(data["score"]),
-                    data["resumen"]
+                res = client.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    messages=[{"role": "user", "content": prompt}]
                 )
+
+                text = res.choices[0].message.content
+                match = re.search(r"\{.*\}", text, re.DOTALL)
+
+                if match:
+                    data = json.loads(match.group())
+
+                    save_video(
+                        user,
+                        run_id,
+                        industry,
+                        channel_id,
+                        v["title"],
+                        data["sentimiento"],
+                        float(data["score"]),
+                        data["resumen"]
+                    )
 
     st.success(f"Run completado: {run_id}")
 
@@ -132,7 +127,7 @@ if df.empty:
 df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
 # =========================
-# RUNS (FIX IMPORTANTE)
+# RUNS FIX
 # =========================
 runs = sorted(df["run_id"].dropna().unique(), reverse=True)
 
@@ -146,50 +141,46 @@ df1 = df[df["run_id"] == run_1]
 df2 = df[df["run_id"] == run_2]
 
 # =========================
-# OVERVIEW (STRIPE STYLE)
+# STRIPE OVERVIEW
 # =========================
 st.markdown("### 📊 Overview")
 
 score_now = df1["score"].mean()
 score_prev = df2["score"].mean()
 
-if pd.isna(score_prev):
-    score_prev = 0
-
 delta = score_now - score_prev
-delta_pct = (delta / (abs(score_prev) + 0.0001)) * 100
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3 = st.columns(3)
 
 col1.metric("Videos", len(df1), len(df1)-len(df2))
-col2.metric("Score", round(score_now,2), f"{delta:+.2f} ({delta_pct:+.1f}%)")
-col3.metric("Canales", df1["canal"].nunique(), df1["canal"].nunique()-df2["canal"].nunique())
-col4.metric("Run", run_1[:8])
+col2.metric("Score", round(score_now,2), f"{delta:+.2f}")
+col3.metric("Industries", df1["industry"].nunique())
 
 # =========================
-# COMPARATIVA POR CANAL
-# =========================
-st.markdown("---")
-st.subheader("📊 Channel Comparison")
-
-r1 = df1.groupby("canal")["score"].mean()
-r2 = df2.groupby("canal")["score"].mean()
-
-compare = pd.DataFrame({
-    "current": r1,
-    "previous": r2
-}).fillna(0)
-
-compare["delta"] = compare["current"] - compare["previous"]
-
-st.bar_chart(compare["delta"])
-
-st.success(f"🏆 Best channel: {compare['delta'].idxmax()}")
-
-# =========================
-# SENTIMIENTO
+# INDUSTRY COMPARISON (CLAVE)
 # =========================
 st.markdown("---")
+st.subheader("🏭 Industry Comparison")
+
+industry_scores = df1.groupby("industry")["score"].mean()
+
+st.bar_chart(industry_scores)
+
+best_industry = industry_scores.idxmax()
+st.success(f"🏆 Best performing industry: {best_industry}")
+
+# =========================
+# CHANNEL PERFORMANCE
+# =========================
+st.subheader("📊 Channel Performance")
+
+channel_scores = df1.groupby("canal")["score"].mean()
+
+st.bar_chart(channel_scores)
+
+# =========================
+# SENTIMENT
+# =========================
 st.subheader("📊 Sentiment")
 
 st.bar_chart(df1["sentimiento"].value_counts())
