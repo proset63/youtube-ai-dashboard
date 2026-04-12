@@ -15,25 +15,49 @@ from datetime import datetime
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 init_db()
 
-st.set_page_config(page_title="Analytics", layout="wide")
+st.set_page_config(page_title="AI SaaS Dashboard", layout="wide")
 
 # =========================
-# STYLE (STRIPE LIKE)
+# STRIPE STYLE CSS
 # =========================
 st.markdown("""
-    <style>
-        .main { background-color: #ffffff; }
-        h1, h2, h3 { font-weight: 600; color: #111827; }
-        .stMetric { background-color: #f9fafb; padding: 15px; border-radius: 12px; }
-        .block-container { padding-top: 2rem; }
-    </style>
+<style>
+.metric-card {
+    background: #f9fafb;
+    padding: 16px;
+    border-radius: 14px;
+    border: 1px solid #e5e7eb;
+}
+
+.metric-label {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 6px;
+}
+
+.metric-value {
+    font-size: 26px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.metric-delta-up {
+    color: #16a34a;
+    font-size: 12px;
+}
+
+.metric-delta-down {
+    color: #dc2626;
+    font-size: 12px;
+}
+</style>
 """, unsafe_allow_html=True)
 
 # =========================
 # SIDEBAR
 # =========================
 with st.sidebar:
-    st.title("📊 Analytics")
+    st.title("📊 Analytics SaaS")
 
     user = st.text_input("Usuario")
 
@@ -41,14 +65,14 @@ with st.sidebar:
 
     channels_input = st.text_area("Channel IDs")
 
-    run_btn = st.button("Run analysis")
+    run_btn = st.button("🚀 Analizar")
 
-    st.caption("Cada run es un snapshot")
+    st.caption("Cada análisis = snapshot (run)")
 
 # =========================
 # MAIN
 # =========================
-st.title("📈 Dashboard")
+st.title("📈 Industry Intelligence Dashboard")
 
 if not user:
     st.stop()
@@ -74,6 +98,7 @@ Devuelve SOLO JSON:
   "score": 0.0,
   "resumen": "1 frase"
 }}
+
 Texto:
 {v['title']} - {v['summary']}
 """
@@ -99,7 +124,7 @@ Texto:
                     data["resumen"]
                 )
 
-    st.success("Run completed")
+    st.success(f"✅ Run completado: {run_id}")
 
 # =========================
 # LOAD DATA
@@ -113,62 +138,91 @@ df = pd.read_sql_query(
 )
 
 if df.empty:
-    st.info("No data yet")
+    st.warning("⚠️ No hay datos aún")
     st.stop()
 
 df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
 # =========================
-# RUNS
+# RUN SELECTOR
 # =========================
 runs = sorted(df["run_id"].unique(), reverse=True)
 
-col1, col2 = st.columns([1,1])
+col1, col2 = st.columns(2)
 
 with col1:
-    run_1 = st.selectbox("Current run", runs)
+    run_1 = st.selectbox("Run actual", runs)
 
 with col2:
-    run_2 = st.selectbox("Previous run", runs)
+    run_2 = st.selectbox("Run anterior", runs)
 
 df1 = df[df["run_id"] == run_1]
 df2 = df[df["run_id"] == run_2]
 
 # =========================
-# KPI STRIPE STYLE
+# STRIPE METRICS
 # =========================
-st.markdown("### Overview")
+st.markdown("### 📊 Overview")
 
-k1, k2, k3, k4 = st.columns(4)
+score_now = df1["score"].mean()
+score_prev = df2["score"].mean()
 
-k1.metric("Videos", len(df1))
-k2.metric("Avg Score", round(df1["score"].mean(), 2))
-k3.metric("Channels", df1["canal"].nunique())
-k4.metric("Run", run_1)
+delta = score_now - score_prev
+delta_pct = (delta / (abs(score_prev) + 0.0001)) * 100
 
-st.markdown("---")
+videos_delta = len(df1) - len(df2)
+channels_delta = df1["canal"].nunique() - df2["canal"].nunique()
+
+col1, col2, col3, col4 = st.columns(4)
+
+def metric_card(label, value, delta_text, positive=True):
+    color_class = "metric-delta-up" if positive else "metric-delta-down"
+
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-label">{label}</div>
+        <div class="metric-value">{value}</div>
+        <div class="{color_class}">{delta_text}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col1:
+    metric_card(
+        "Videos",
+        len(df1),
+        f"{videos_delta:+d} vs prev",
+        videos_delta >= 0
+    )
+
+with col2:
+    metric_card(
+        "Avg Score",
+        f"{score_now:.2f}",
+        f"{delta:+.2f} ({delta_pct:+.1f}%)",
+        delta >= 0
+    )
+
+with col3:
+    metric_card(
+        "Channels",
+        df1["canal"].nunique(),
+        f"{channels_delta:+d} vs prev",
+        channels_delta >= 0
+    )
+
+with col4:
+    metric_card(
+        "Run",
+        run_1[:8],
+        "current snapshot",
+        True
+    )
 
 # =========================
 # COMPARISON
 # =========================
-st.markdown("### Performance change")
-
-score1 = df1["score"].mean()
-score2 = df2["score"].mean()
-delta = score1 - score2
-
-c1, c2, c3 = st.columns(3)
-
-c1.metric("Current", round(score1, 2))
-c2.metric("Previous", round(score2, 2))
-c3.metric("Change", round(delta, 2))
-
 st.markdown("---")
-
-# =========================
-# CHANNEL PERFORMANCE
-# =========================
-st.markdown("### Channel performance")
+st.subheader("📊 Channel Performance")
 
 r1 = df1.groupby("canal")["score"].mean()
 r2 = df2.groupby("canal")["score"].mean()
@@ -182,11 +236,19 @@ compare["delta"] = compare["current"] - compare["previous"]
 
 st.bar_chart(compare["delta"])
 
-st.markdown("---")
+st.success(f"🏆 Best improvement: {compare['delta'].idxmax()}")
 
 # =========================
 # SENTIMENT
 # =========================
-st.markdown("### Sentiment")
+st.markdown("---")
+st.subheader("📊 Sentiment")
 
 st.bar_chart(df1["sentimiento"].value_counts())
+
+# =========================
+# TREND
+# =========================
+st.subheader("📈 Trend")
+
+st.line_chart(df1["score"])
