@@ -2,16 +2,23 @@ import streamlit as st
 import os
 import sqlite3
 import pandas as pd
+import json
+import re
 from datetime import datetime
+
 from googleapiclient.discovery import build
+from openai import OpenAI
 
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="AI SaaS Dashboard", layout="wide")
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # =========================
 # DB
@@ -25,30 +32,42 @@ CREATE TABLE IF NOT EXISTS analytics (
     user TEXT,
     run_id TEXT,
     channel TEXT,
-    title TEXT
+    title TEXT,
+    sentiment TEXT,
+    score REAL,
+    insight TEXT
 )
 """)
+
 conn.commit()
 
 # =========================
-# LOGIN SIMPLE
+# LOGIN
 # =========================
-USERS = {"demo@saas.com": "1234"}
+USERS = {
+    "demo@saas.com": "1234",
+    "admin@saas.com": "admin"
+}
 
-st.sidebar.title("Login")
-email = st.sidebar.text_input("Email")
-password = st.sidebar.text_input("Password", type="password")
+def login():
+    st.title("🔐 SaaS Login")
 
-if st.sidebar.button("Login"):
-    if email in USERS and USERS[email] == password:
-        st.session_state["auth"] = True
-        st.session_state["user"] = email
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if email in USERS and USERS[email] == password:
+            st.session_state["auth"] = True
+            st.session_state["user"] = email
+        else:
+            st.error("Credenciales incorrectas")
 
 if "auth" not in st.session_state:
+    login()
     st.stop()
 
 user = st.session_state["user"]
-st.sidebar.success(user)
+st.sidebar.success(f"👤 {user}")
 
 # =========================
 # STATE
@@ -57,31 +76,62 @@ if "run_id" not in st.session_state:
     st.session_state["run_id"] = None
 
 # =========================
+# IA FUNCTION
+# =========================
+def analyze_text(text):
+
+    prompt = f"""
+Devuelve SOLO JSON válido:
+
+{{
+"sentiment": "positive|neutral|negative",
+"score": 0-1,
+"insight": "1 frase clara"
+}}
+
+Texto:
+{text}
+"""
+
+    res = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    match = re.search(r"\{.*\}", res.choices[0].message.content, re.DOTALL)
+
+    if match:
+        return json.loads(match.group())
+
+    return {"sentiment": "neutral", "score": 0.5, "insight": "N/A"}
+
+# =========================
 # UI
 # =========================
-st.title("📊 YouTube SaaS DEBUG")
+st.title("📊 SaaS Intelligence Dashboard PRO")
 
 input_data = st.text_area(
-    "Canales (uno por línea)",
+    "Channels (uno por línea)",
+    value="",
     placeholder="Apple\nGoogle\nMeta"
 )
 
 col1, col2 = st.columns(2)
-run_btn = col1.button("🚀 Run")
+run_btn = col1.button("🚀 Run Analysis")
 reset_btn = col2.button("🧹 Reset")
 
 # =========================
-# RESET REAL
+# RESET
 # =========================
 if reset_btn:
     c.execute("DELETE FROM analytics WHERE user=?", (user,))
     conn.commit()
     st.session_state["run_id"] = None
-    st.success("Datos borrados")
+    st.success("Datos eliminados")
     st.rerun()
 
 # =========================
-# RUN PIPELINE (SEGURO)
+# RUN PIPELINE
 # =========================
 if run_btn and input_data.strip() != "":
 
@@ -93,11 +143,8 @@ if run_btn and input_data.strip() != "":
     for channel_name in input_data.split("\n"):
 
         channel_name = channel_name.strip()
-
         if not channel_name:
             continue
-
-        st.write("🔍 Buscando:", channel_name)
 
         try:
             # SEARCH CHANNEL
@@ -109,9 +156,8 @@ if run_btn and input_data.strip() != "":
             ).execute()
 
             items = res.get("items", [])
-
             if not items:
-                st.warning("No encontrado")
+                st.warning(f"No encontrado: {channel_name}")
                 continue
 
             channel_id = items[0]["snippet"]["channelId"]
@@ -120,7 +166,7 @@ if run_btn and input_data.strip() != "":
             videos = youtube.search().list(
                 part="snippet",
                 channelId=channel_id,
-                maxResults=3,
+                maxResults=5,
                 order="date",
                 type="video"
             ).execute()
@@ -128,23 +174,30 @@ if run_btn and input_data.strip() != "":
             for v in videos.get("items", []):
 
                 title = v["snippet"]["title"]
+                desc = v["snippet"]["description"]
 
-                st.write("💾 Guardando:", title)
+                text = title + " " + desc
 
+                # IA ANALYSIS
+                data = analyze_text(text)
+
+                # SAVE DB
                 c.execute("""
-                INSERT INTO analytics VALUES (NULL,?,?,?,?)
+                INSERT INTO analytics VALUES (NULL,?,?,?,?,?,?,?)
                 """, (
                     user,
                     run_id,
                     channel_name,
-                    title
+                    title,
+                    data["sentiment"],
+                    float(data["score"]),
+                    data["insight"]
                 ))
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error en {channel_name}: {e}")
 
     conn.commit()
-    st.success("Datos guardados")
     st.rerun()
 
 # =========================
@@ -157,7 +210,7 @@ df = pd.read_sql_query(
 )
 
 if df.empty:
-    st.warning("No hay datos aún")
+    st.info("No hay datos aún")
     st.stop()
 
 # =========================
@@ -172,23 +225,34 @@ df_run = df[df["run_id"] == selected_run]
 # =========================
 # KPIs
 # =========================
-st.subheader("📊 KPIs")
+st.subheader("📊 Overview")
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 col1.metric("Videos", len(df_run))
-col2.metric("Canales", df_run["channel"].nunique())
+col2.metric("Avg Score", round(df_run["score"].mean(), 2))
+col3.metric("Channels", df_run["channel"].nunique())
+
+st.markdown("---")
 
 # =========================
-# CHART
+# CHARTS
 # =========================
-st.subheader("📺 Videos por canal")
+st.subheader("📺 Channel Performance")
+st.bar_chart(df_run.groupby("channel")["score"].mean())
 
-st.bar_chart(df_run["channel"].value_counts())
+st.subheader("💬 Sentiment")
+st.bar_chart(df_run["sentiment"].value_counts())
 
 # =========================
 # TABLE
 # =========================
-st.subheader("📋 Datos")
+st.subheader("📋 Insights")
 
-st.dataframe(df_run)
+st.dataframe(df_run[[
+    "channel",
+    "title",
+    "sentiment",
+    "score",
+    "insight"
+]])
