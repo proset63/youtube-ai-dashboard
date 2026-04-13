@@ -6,6 +6,9 @@ from datetime import datetime
 import json
 import re
 
+from dotenv import load_dotenv
+load_dotenv()  # 🔥 FIX: carga .env correctamente
+
 from googleapiclient.discovery import build
 from openai import OpenAI
 
@@ -14,19 +17,20 @@ from openai import OpenAI
 # =========================
 st.set_page_config(page_title="AI SaaS Stable Dashboard", layout="wide")
 
+# 🔥 LOAD KEYS
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# 🔥 CHECK FINAL (IMPORTANTE)
-st.write("API KEY:", YOUTUBE_API_KEY)
+# 🔍 DEBUG (puedes quitarlo luego)
+st.write("YOUTUBE API KEY LOADED:", bool(YOUTUBE_API_KEY))
 
-# 🛑 STOP SI FALTAN KEYS
+# 🛑 SAFETY CHECK
 if not YOUTUBE_API_KEY:
-    st.error("❌ Missing YOUTUBE_API_KEY in environment variables")
+    st.error("❌ Missing YOUTUBE_API_KEY (.env or Windows env)")
     st.stop()
 
 if not OPENAI_API_KEY:
-    st.error("❌ Missing OPENAI_API_KEY in environment variables")
+    st.error("❌ Missing OPENAI_API_KEY (.env or Windows env)")
     st.stop()
 
 # =========================
@@ -36,7 +40,7 @@ youtube = build(
     "youtube",
     "v3",
     developerKey=YOUTUBE_API_KEY,
-    cache_discovery=False   # 🔥 FIX IMPORTANTE
+    cache_discovery=False  # 🔥 FIX ESTABILIDAD
 )
 
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -109,7 +113,7 @@ def virality_score(text):
     return min(score, 1.0)
 
 # =========================
-# COMMENTS
+# COMMENTS YOUTUBE
 # =========================
 def get_comments(video_id, max_comments=15):
     try:
@@ -191,7 +195,7 @@ if reset_btn:
     st.rerun()
 
 # =========================
-# RUN
+# RUN PIPELINE
 # =========================
 if run_btn:
 
