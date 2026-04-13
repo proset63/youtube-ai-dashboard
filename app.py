@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS analytics (
     run_id TEXT,
     channel TEXT,
     title TEXT,
+    video_id TEXT,
+    url TEXT,
     engagement REAL,
     business REAL,
     virality REAL,
@@ -42,21 +44,20 @@ conn.commit()
 USERS = {"demo": "1234"}
 
 st.sidebar.title("Login")
-user = st.sidebar.text_input("User")
-password = st.sidebar.text_input("Password", type="password")
+user_input = st.sidebar.text_input("User")
+pass_input = st.sidebar.text_input("Password", type="password")
 
 if st.sidebar.button("Login"):
-    if user in USERS and USERS[user] == password:
+    if user_input in USERS and USERS[user_input] == pass_input:
         st.session_state["auth"] = True
-        st.session_state["user"] = user
+        st.session_state["user"] = user_input
     else:
-        st.error("Credenciales incorrectas")
+        st.sidebar.error("Credenciales incorrectas")
 
 if "auth" not in st.session_state:
     st.stop()
 
 user = st.session_state["user"]
-st.sidebar.success(user)
 
 # =========================
 # SCORING
@@ -67,32 +68,26 @@ def engagement_score(text):
         score += 0.2
     if len(text) > 60:
         score += 0.1
-    if "!" in text:
-        score += 0.2
     return min(score, 1.0)
 
 def business_score(text):
     score = 0.5
     if any(x in text.lower() for x in ["ai", "business", "money", "growth"]):
         score += 0.3
-    if any(x in text.lower() for x in ["review", "vs"]):
-        score += 0.2
     return min(score, 1.0)
 
 def virality_score(text):
     score = 0.4
-    if any(x in text.lower() for x in ["breaking", "viral", "insane"]):
+    if any(x in text.lower() for x in ["viral", "breaking", "insane"]):
         score += 0.4
-    if "!" in text:
-        score += 0.1
     return min(score, 1.0)
 
 # =========================
 # UI
 # =========================
-st.title("📊 AI SaaS Dashboard (Stripe Style)")
+st.title("📊 AI SaaS Dashboard (YouTube Clickable)")
 
-channels = st.text_area("Channels (uno por línea)", "Apple\nGoogle\nMeta")
+channels = st.text_area("Channels", "Apple\nGoogle\nMeta")
 
 col1, col2 = st.columns(2)
 run_btn = col1.button("🚀 Run")
@@ -120,6 +115,7 @@ if run_btn:
         if not ch:
             continue
 
+        # Buscar canal
         res = youtube.search().list(
             part="snippet",
             q=ch,
@@ -133,6 +129,7 @@ if run_btn:
 
         channel_id = items[0]["snippet"]["channelId"]
 
+        # Vídeos
         videos = youtube.search().list(
             part="snippet",
             channelId=channel_id,
@@ -143,10 +140,12 @@ if run_btn:
 
         for v in videos.get("items", []):
 
+            video_id = v["id"]["videoId"]
             title = v["snippet"]["title"]
-            desc = v["snippet"]["description"]
 
-            text = title + " " + desc
+            url = f"https://www.youtube.com/watch?v={video_id}"
+
+            text = title
 
             eng = engagement_score(text)
             biz = business_score(text)
@@ -155,12 +154,14 @@ if run_btn:
             final = (eng * 0.4 + biz * 0.3 + vir * 0.3)
 
             c.execute("""
-            INSERT INTO analytics VALUES (NULL,?,?,?,?,?,?,?,?)
+            INSERT INTO analytics VALUES (NULL,?,?,?,?,?,?,?,?,?,?)
             """, (
                 user,
                 run_id,
                 ch,
                 title,
+                video_id,
+                url,
                 eng,
                 biz,
                 vir,
@@ -192,7 +193,7 @@ selected_run = st.selectbox("Run", runs)
 df_run = df[df["run_id"] == selected_run]
 
 # =========================
-# KPIs (STRIPE STYLE)
+# KPIs
 # =========================
 st.markdown("## 📊 Overview")
 
@@ -206,38 +207,21 @@ c4.metric("🔥 Virality", round(df_run["virality"].mean(), 2))
 st.markdown("---")
 
 # =========================
-# CHARTS
+# TABLE WITH LINKS
 # =========================
-st.subheader("Channel Performance")
-st.bar_chart(df_run.groupby("channel")["final_score"].mean())
+st.subheader("📋 Videos (clickable)")
 
-# =========================
-# TABLE
-# =========================
-st.subheader("Table")
-st.dataframe(df_run.sort_values("final_score", ascending=False))
+for _, row in df_run.iterrows():
 
-# =========================
-# CARDS VIEW
-# =========================
-st.markdown("---")
-st.subheader("🎥 Cards View")
-
-for ch in df_run["channel"].unique():
-
-    st.markdown(f"## {ch}")
-
-    sub = df_run[df_run["channel"] == ch]
-
-    for _, row in sub.iterrows():
-
-        st.markdown(f"""
+    st.markdown(f"""
 ### 🎬 {row['title']}
 
-⭐ {round(row['final_score'], 2)}  
-📈 {round(row['engagement'], 2)}  
-💰 {round(row['business'], 2)}  
-🔥 {round(row['virality'], 2)}
+⭐ Score: {round(row['final_score'], 2)}  
+📈 Engagement: {round(row['engagement'], 2)}  
+💰 Business: {round(row['business'], 2)}  
+🔥 Virality: {round(row['virality'], 2)}  
+
+👉 [Ver en YouTube]({row['url']})
 """)
 
-        st.divider()
+    st.divider()
