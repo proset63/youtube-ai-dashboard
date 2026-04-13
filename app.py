@@ -5,14 +5,18 @@ import pandas as pd
 from datetime import datetime
 
 from googleapiclient.discovery import build
+from openai import OpenAI
 
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="AI SaaS Dashboard", layout="wide")
+st.set_page_config(page_title="AI Social Intelligence SaaS", layout="wide")
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # =========================
 # DB
@@ -32,13 +36,15 @@ CREATE TABLE IF NOT EXISTS analytics (
     engagement REAL,
     business REAL,
     virality REAL,
+    social_score REAL,
+    social_insight TEXT,
     final_score REAL
 )
 """)
 conn.commit()
 
 # =========================
-# LOGIN SIMPLE
+# LOGIN
 # =========================
 USERS = {"demo": "1234"}
 
@@ -59,7 +65,7 @@ if "auth" not in st.session_state:
 user = st.session_state["user"]
 
 # =========================
-# SCORING
+# SCORING CONTENT
 # =========================
 def engagement_score(text):
     score = 0.5
@@ -82,9 +88,66 @@ def virality_score(text):
     return min(score, 1.0)
 
 # =========================
+# COMMENTS (YouTube API)
+# =========================
+def get_comments(video_id, max_comments=20):
+    try:
+        req = youtube.commentThreads().list(
+            part="snippet",
+            videoId=video_id,
+            maxResults=max_comments,
+            textFormat="plainText"
+        )
+        res = req.execute()
+
+        comments = []
+        for item in res.get("items", []):
+            text = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
+            comments.append(text)
+
+        return comments
+    except:
+        return []
+
+# =========================
+# AI ANALYSIS COMMENTS
+# =========================
+def analyze_comments(comments):
+    if not comments:
+        return 0.5, "No comments"
+
+    text = "\n".join(comments[:10])
+
+    prompt = f"""
+Analiza comentarios de YouTube y devuelve JSON:
+
+{{
+"sentiment": 0-1,
+"insight": "resumen corto de la opinión"
+}}
+
+Comentarios:
+{text}
+"""
+
+    res = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    import json, re
+    match = re.search(r"\{.*\}", res.choices[0].message.content, re.DOTALL)
+
+    if match:
+        data = json.loads(match.group())
+        return data.get("sentiment", 0.5), data.get("insight", "")
+
+    return 0.5, "error"
+
+# =========================
 # UI
 # =========================
-st.title("📊 AI SaaS Dashboard (Stripe Style)")
+st.title("📊 Social Intelligence SaaS (YouTube + AI)")
 
 channels = st.text_area("Channels", "Apple\nGoogle\nMeta")
 
@@ -142,14 +205,19 @@ if run_btn:
 
             url = f"https://www.youtube.com/watch?v={video_id}"
 
-            eng = engagement_score(title)
-            biz = business_score(title)
-            vir = virality_score(title)
+            text = title
 
-            final = (eng * 0.4 + biz * 0.3 + vir * 0.3)
+            eng = engagement_score(text)
+            biz = business_score(text)
+            vir = virality_score(text)
+
+            comments = get_comments(video_id)
+            social_score, insight = analyze_comments(comments)
+
+            final = (eng * 0.25 + biz * 0.25 + vir * 0.2 + social_score * 0.3)
 
             c.execute("""
-            INSERT INTO analytics VALUES (NULL,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO analytics VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 user,
                 run_id,
@@ -160,6 +228,8 @@ if run_btn:
                 eng,
                 biz,
                 vir,
+                social_score,
+                insight,
                 final
             ))
 
@@ -194,38 +264,33 @@ st.markdown("## 📊 Overview")
 
 c1, c2, c3, c4 = st.columns(4)
 
-c1.metric("⭐ Score", round(df_run["final_score"].mean(), 2))
+c1.metric("⭐ Final Score", round(df_run["final_score"].mean(), 2))
 c2.metric("📈 Engagement", round(df_run["engagement"].mean(), 2))
 c3.metric("💰 Business", round(df_run["business"].mean(), 2))
-c4.metric("🔥 Virality", round(df_run["virality"].mean(), 2))
+c4.metric("💬 Social", round(df_run["social_score"].mean(), 2))
 
 st.markdown("---")
 
 # =========================
-# GRÁFICOS (RESTORED)
+# GRÁFICOS
 # =========================
 st.subheader("📊 Channel Performance")
-
 st.bar_chart(df_run.groupby("channel")["final_score"].mean())
 
-st.subheader("📈 Metrics Overview")
-
-st.line_chart(df_run[["engagement", "business", "virality"]])
+st.subheader("💬 Social Sentiment")
+st.bar_chart(df_run.groupby("channel")["social_score"].mean())
 
 # =========================
 # TABLE
 # =========================
 st.subheader("📋 Table")
-
-st.dataframe(
-    df_run.sort_values("final_score", ascending=False)
-)
+st.dataframe(df_run.sort_values("final_score", ascending=False))
 
 # =========================
-# CARDS + LINKS
+# CARDS
 # =========================
 st.markdown("---")
-st.subheader("🎥 Videos (Clickable)")
+st.subheader("🎥 Videos + Insights")
 
 for _, row in df_run.iterrows():
 
@@ -235,7 +300,9 @@ for _, row in df_run.iterrows():
 ⭐ Score: {round(row['final_score'], 2)}  
 📈 Engagement: {round(row['engagement'], 2)}  
 💰 Business: {round(row['business'], 2)}  
-🔥 Virality: {round(row['virality'], 2)}
+💬 Social: {round(row['social_score'], 2)}  
+
+🧠 Insight: {row['social_insight']}  
 
 👉 [Ver en YouTube]({row['url']})
 """)
