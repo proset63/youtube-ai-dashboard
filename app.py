@@ -17,7 +17,28 @@ st.set_page_config(page_title="AI SaaS Stable Dashboard", layout="wide")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+# 🔥 CHECK FINAL (IMPORTANTE)
+st.write("API KEY:", YOUTUBE_API_KEY)
+
+# 🛑 STOP SI FALTAN KEYS
+if not YOUTUBE_API_KEY:
+    st.error("❌ Missing YOUTUBE_API_KEY in environment variables")
+    st.stop()
+
+if not OPENAI_API_KEY:
+    st.error("❌ Missing OPENAI_API_KEY in environment variables")
+    st.stop()
+
+# =========================
+# CLIENTS
+# =========================
+youtube = build(
+    "youtube",
+    "v3",
+    developerKey=YOUTUBE_API_KEY,
+    cache_discovery=False   # 🔥 FIX IMPORTANTE
+)
+
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # =========================
@@ -88,7 +109,7 @@ def virality_score(text):
     return min(score, 1.0)
 
 # =========================
-# COMMENTS YOUTUBE
+# COMMENTS
 # =========================
 def get_comments(video_id, max_comments=15):
     try:
@@ -111,7 +132,7 @@ def get_comments(video_id, max_comments=15):
         return []
 
 # =========================
-# SAFE AI ANALYSIS (FIX JSON ERROR)
+# AI ANALYSIS
 # =========================
 def analyze_comments(comments):
     if not comments:
@@ -170,7 +191,7 @@ if reset_btn:
     st.rerun()
 
 # =========================
-# RUN PIPELINE
+# RUN
 # =========================
 if run_btn:
 
@@ -251,9 +272,6 @@ if df.empty:
     st.warning("No data yet")
     st.stop()
 
-# =========================
-# RUN SELECTOR
-# =========================
 runs = sorted(df["run_id"].unique(), reverse=True)
 selected_run = st.selectbox("Run", runs)
 
@@ -273,25 +291,17 @@ c4.metric("💬 Social", round(df_run["social_score"].mean(), 2))
 
 st.markdown("---")
 
-# =========================
-# GRÁFICOS
-# =========================
 st.subheader("📊 Channel Performance")
 st.bar_chart(df_run.groupby("channel")["final_score"].mean())
 
 st.subheader("💬 Social Sentiment")
 st.bar_chart(df_run.groupby("channel")["social_score"].mean())
 
-# =========================
-# TABLE
-# =========================
 st.subheader("📋 Table")
 st.dataframe(df_run.sort_values("final_score", ascending=False))
 
-# =========================
-# CARDS
-# =========================
 st.markdown("---")
+
 st.subheader("🎥 Videos + Insights")
 
 for _, row in df_run.iterrows():
