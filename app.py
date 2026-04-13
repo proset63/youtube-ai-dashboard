@@ -12,7 +12,6 @@ from googleapiclient.discovery import build
 st.set_page_config(page_title="AI SaaS Dashboard", layout="wide")
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-
 youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
 # =========================
@@ -85,7 +84,7 @@ def virality_score(text):
 # =========================
 # UI
 # =========================
-st.title("📊 AI SaaS Dashboard (YouTube Clickable)")
+st.title("📊 AI SaaS Dashboard (Stripe Style)")
 
 channels = st.text_area("Channels", "Apple\nGoogle\nMeta")
 
@@ -115,7 +114,6 @@ if run_btn:
         if not ch:
             continue
 
-        # Buscar canal
         res = youtube.search().list(
             part="snippet",
             q=ch,
@@ -129,7 +127,6 @@ if run_btn:
 
         channel_id = items[0]["snippet"]["channelId"]
 
-        # Vídeos
         videos = youtube.search().list(
             part="snippet",
             channelId=channel_id,
@@ -145,11 +142,9 @@ if run_btn:
 
             url = f"https://www.youtube.com/watch?v={video_id}"
 
-            text = title
-
-            eng = engagement_score(text)
-            biz = business_score(text)
-            vir = virality_score(text)
+            eng = engagement_score(title)
+            biz = business_score(title)
+            vir = virality_score(title)
 
             final = (eng * 0.4 + biz * 0.3 + vir * 0.3)
 
@@ -207,9 +202,30 @@ c4.metric("🔥 Virality", round(df_run["virality"].mean(), 2))
 st.markdown("---")
 
 # =========================
-# TABLE WITH LINKS
+# GRÁFICOS (RESTORED)
 # =========================
-st.subheader("📋 Videos (clickable)")
+st.subheader("📊 Channel Performance")
+
+st.bar_chart(df_run.groupby("channel")["final_score"].mean())
+
+st.subheader("📈 Metrics Overview")
+
+st.line_chart(df_run[["engagement", "business", "virality"]])
+
+# =========================
+# TABLE
+# =========================
+st.subheader("📋 Table")
+
+st.dataframe(
+    df_run.sort_values("final_score", ascending=False)
+)
+
+# =========================
+# CARDS + LINKS
+# =========================
+st.markdown("---")
+st.subheader("🎥 Videos (Clickable)")
 
 for _, row in df_run.iterrows():
 
@@ -219,7 +235,7 @@ for _, row in df_run.iterrows():
 ⭐ Score: {round(row['final_score'], 2)}  
 📈 Engagement: {round(row['engagement'], 2)}  
 💰 Business: {round(row['business'], 2)}  
-🔥 Virality: {round(row['virality'], 2)}  
+🔥 Virality: {round(row['virality'], 2)}
 
 👉 [Ver en YouTube]({row['url']})
 """)
