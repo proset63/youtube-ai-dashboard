@@ -3,6 +3,8 @@ import os
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import json
+import re
 
 from googleapiclient.discovery import build
 from openai import OpenAI
@@ -10,7 +12,7 @@ from openai import OpenAI
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="AI Social Intelligence SaaS", layout="wide")
+st.set_page_config(page_title="AI SaaS Stable Dashboard", layout="wide")
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -65,14 +67,12 @@ if "auth" not in st.session_state:
 user = st.session_state["user"]
 
 # =========================
-# SCORING CONTENT
+# SCORING
 # =========================
 def engagement_score(text):
     score = 0.5
     if any(x in text.lower() for x in ["how", "tutorial", "best", "guide"]):
         score += 0.2
-    if len(text) > 60:
-        score += 0.1
     return min(score, 1.0)
 
 def business_score(text):
@@ -88,9 +88,9 @@ def virality_score(text):
     return min(score, 1.0)
 
 # =========================
-# COMMENTS (YouTube API)
+# COMMENTS YOUTUBE
 # =========================
-def get_comments(video_id, max_comments=20):
+def get_comments(video_id, max_comments=15):
     try:
         req = youtube.commentThreads().list(
             part="snippet",
@@ -102,15 +102,16 @@ def get_comments(video_id, max_comments=20):
 
         comments = []
         for item in res.get("items", []):
-            text = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
-            comments.append(text)
+            comments.append(
+                item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
+            )
 
         return comments
     except:
         return []
 
 # =========================
-# AI ANALYSIS COMMENTS
+# SAFE AI ANALYSIS (FIX JSON ERROR)
 # =========================
 def analyze_comments(comments):
     if not comments:
@@ -119,11 +120,11 @@ def analyze_comments(comments):
     text = "\n".join(comments[:10])
 
     prompt = f"""
-Analiza comentarios de YouTube y devuelve JSON:
+Devuelve SOLO un JSON válido:
 
 {{
 "sentiment": 0-1,
-"insight": "resumen corto de la opinión"
+"insight": "1 frase corta"
 }}
 
 Comentarios:
@@ -132,22 +133,26 @@ Comentarios:
 
     res = client.chat.completions.create(
         model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0
     )
 
-    import json, re
-    match = re.search(r"\{.*\}", res.choices[0].message.content, re.DOTALL)
+    content = res.choices[0].message.content
 
-    if match:
-        data = json.loads(match.group())
-        return data.get("sentiment", 0.5), data.get("insight", "")
+    try:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            data = json.loads(match.group())
+            return data.get("sentiment", 0.5), data.get("insight", "ok")
+    except:
+        pass
 
-    return 0.5, "error"
+    return 0.5, "parse error"
 
 # =========================
 # UI
 # =========================
-st.title("📊 Social Intelligence SaaS (YouTube + AI)")
+st.title("📊 Stable AI SaaS Dashboard")
 
 channels = st.text_area("Channels", "Apple\nGoogle\nMeta")
 
@@ -202,14 +207,11 @@ if run_btn:
 
             video_id = v["id"]["videoId"]
             title = v["snippet"]["title"]
-
             url = f"https://www.youtube.com/watch?v={video_id}"
 
-            text = title
-
-            eng = engagement_score(text)
-            biz = business_score(text)
-            vir = virality_score(text)
+            eng = engagement_score(title)
+            biz = business_score(title)
+            vir = virality_score(title)
 
             comments = get_comments(video_id)
             social_score, insight = analyze_comments(comments)
@@ -264,7 +266,7 @@ st.markdown("## 📊 Overview")
 
 c1, c2, c3, c4 = st.columns(4)
 
-c1.metric("⭐ Final Score", round(df_run["final_score"].mean(), 2))
+c1.metric("⭐ Score", round(df_run["final_score"].mean(), 2))
 c2.metric("📈 Engagement", round(df_run["engagement"].mean(), 2))
 c3.metric("💰 Business", round(df_run["business"].mean(), 2))
 c4.metric("💬 Social", round(df_run["social_score"].mean(), 2))
