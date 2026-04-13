@@ -7,9 +7,10 @@ import json
 import re
 
 from dotenv import load_dotenv
-load_dotenv()  # 🔥 FIX: carga .env correctamente
+load_dotenv()
 
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from openai import OpenAI
 
 # =========================
@@ -17,30 +18,24 @@ from openai import OpenAI
 # =========================
 st.set_page_config(page_title="AI SaaS Stable Dashboard", layout="wide")
 
-# 🔥 LOAD KEYS
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# 🔍 DEBUG (puedes quitarlo luego)
-st.write("YOUTUBE API KEY LOADED:", bool(YOUTUBE_API_KEY))
+st.write("API KEY LOADED:", bool(YOUTUBE_API_KEY))
 
-# 🛑 SAFETY CHECK
 if not YOUTUBE_API_KEY:
-    st.error("❌ Missing YOUTUBE_API_KEY (.env or Windows env)")
+    st.error("❌ Missing YOUTUBE_API_KEY")
     st.stop()
 
 if not OPENAI_API_KEY:
-    st.error("❌ Missing OPENAI_API_KEY (.env or Windows env)")
+    st.error("❌ Missing OPENAI_API_KEY")
     st.stop()
 
-# =========================
-# CLIENTS
-# =========================
 youtube = build(
     "youtube",
     "v3",
     developerKey=YOUTUBE_API_KEY,
-    cache_discovery=False  # 🔥 FIX ESTABILIDAD
+    cache_discovery=False
 )
 
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -113,7 +108,7 @@ def virality_score(text):
     return min(score, 1.0)
 
 # =========================
-# COMMENTS YOUTUBE
+# COMMENTS
 # =========================
 def get_comments(video_id, max_comments=15):
     try:
@@ -132,7 +127,15 @@ def get_comments(video_id, max_comments=15):
             )
 
         return comments
-    except:
+
+    except HttpError as e:
+        st.error("❌ YouTube API Error (comments)")
+        st.exception(e)
+        return []
+
+    except Exception as e:
+        st.error("❌ Unknown error (comments)")
+        st.exception(e)
         return []
 
 # =========================
@@ -195,7 +198,7 @@ if reset_btn:
     st.rerun()
 
 # =========================
-# RUN PIPELINE
+# RUN
 # =========================
 if run_btn:
 
@@ -207,12 +210,18 @@ if run_btn:
         if not ch:
             continue
 
-        res = youtube.search().list(
-            part="snippet",
-            q=ch,
-            type="channel",
-            maxResults=1
-        ).execute()
+        try:
+            res = youtube.search().list(
+                part="snippet",
+                q=ch,
+                type="channel",
+                maxResults=1
+            ).execute()
+
+        except HttpError as e:
+            st.error("❌ YouTube API Error (search channel)")
+            st.exception(e)
+            st.stop()
 
         items = res.get("items", [])
         if not items:
@@ -220,13 +229,19 @@ if run_btn:
 
         channel_id = items[0]["snippet"]["channelId"]
 
-        videos = youtube.search().list(
-            part="snippet",
-            channelId=channel_id,
-            type="video",
-            maxResults=5,
-            order="date"
-        ).execute()
+        try:
+            videos = youtube.search().list(
+                part="snippet",
+                channelId=channel_id,
+                type="video",
+                maxResults=5,
+                order="date"
+            ).execute()
+
+        except HttpError as e:
+            st.error("❌ YouTube API Error (videos)")
+            st.exception(e)
+            st.stop()
 
         for v in videos.get("items", []):
 
